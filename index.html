@@ -601,8 +601,65 @@ const sfx = {
   chomp() { tone(220, 120, 0.06, 0.07, 'square'); },
   drop() { tone(1200, 600, 0.08, 0.04); },
   bite() { tone(500, 160, 0.06, 0.1, 'square'); setTimeout(() => tone(420, 140, 0.05, 0.08, 'square'), 70); },
-  ouch() { tone(330, 170, 0.32, 0.13, 'sawtooth'); },
 };
+
+// Owner's "Ай!" — a tiny formant voice synth: a buzzing source shaped by vowel formants,
+// gliding from "а"/"о" into "й" with a yelping pitch jump.
+const VOWELS = { a: [820, 1250, 2600], o: [500, 880, 2500], i: [290, 2250, 3000] };
+function ownerYell(syllables) {
+  if (!actx || !settings.sound) return;
+  try {
+    const t0 = actx.currentTime + 0.03;
+    const base = rnd(135, 185);
+    const comp = actx.createDynamicsCompressor();
+    const master = actx.createGain(); master.gain.value = 0.4;
+    comp.connect(master).connect(actx.destination);
+    syllables.forEach((syl, k) => {
+      const last = k === syllables.length - 1;
+      const st = t0 + k * 0.24, dur = last ? 0.46 : 0.2;
+      const pitch = base * (1 + k * 0.08);
+      const src = actx.createOscillator();
+      src.type = 'sawtooth';
+      src.frequency.setValueAtTime(pitch * 1.35, st);
+      src.frequency.linearRampToValueAtTime(pitch * 1.9, st + 0.05);
+      src.frequency.exponentialRampToValueAtTime(pitch * (last ? 1.0 : 1.4), st + dur);
+      const vib = actx.createOscillator(), vibG = actx.createGain();
+      vib.frequency.value = 6.5; vibG.gain.value = pitch * 0.03;
+      vib.connect(vibG).connect(src.frequency);
+      const env = actx.createGain();
+      env.gain.setValueAtTime(0.0001, st);
+      env.gain.exponentialRampToValueAtTime(1, st + 0.02);
+      env.gain.setValueAtTime(1, st + dur * 0.55);
+      env.gain.exponentialRampToValueAtTime(0.0001, st + dur);
+      const from = VOWELS[syl[0]], to = VOWELS[syl[1]];
+      from.forEach((f, i) => {
+        const bp = actx.createBiquadFilter();
+        bp.type = 'bandpass'; bp.Q.value = [5, 8, 11][i];
+        bp.frequency.setValueAtTime(f, st);
+        bp.frequency.setValueAtTime(f, st + dur * 0.4);
+        bp.frequency.linearRampToValueAtTime(to[i], st + dur * 0.85);
+        const g = actx.createGain(); g.gain.value = [3.2, 2.2, 1.0][i];
+        src.connect(bp).connect(g).connect(env);
+      });
+      // a puff of breath at the start of each syllable
+      const n = Math.floor(actx.sampleRate * 0.08), buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const breath = actx.createBufferSource(); breath.buffer = buf;
+      const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1500;
+      const bg = actx.createGain(); bg.gain.value = 0.25;
+      breath.connect(hp).connect(bg).connect(env);
+      env.connect(comp);
+      src.start(st); vib.start(st); breath.start(st);
+      src.stop(st + dur + 0.05); vib.stop(st + dur + 0.05);
+    });
+  } catch (e) {}
+}
+const YELLS = [
+  { text: 'Ай! Рыжик меня укусил!', voice: ['ai'] },
+  { text: 'Ой-ой! Кусается!', voice: ['oi', 'oi'] },
+  { text: 'Ай! Вот вредина!', voice: ['ai'] },
+  { text: 'Ай-ай-ай! За палец!', voice: ['ai', 'ai', 'ai'] },
+];
 
 // ---------- messages ----------
 function say(text, color) {
@@ -693,8 +750,9 @@ function bite() {
   S.bites++;
   S.ownerMood = Math.max(0, S.ownerMood - 25);
   S.stats.joy = Math.min(100, S.stats.joy + 5);
-  sfx.bite(); setTimeout(() => sfx.ouch(), 120);
-  say(pick(['Ай! Рыжик меня укусил!', 'Ой-ой! Кусается!', 'Ай! Вот вредина!', 'Ай-ай-ай! За палец!']), '#ff9a8a');
+  const yell = pick(YELLS);
+  sfx.bite(); setTimeout(() => ownerYell(yell.voice), 110);
+  say(yell.text, '#ff9a8a');
   if (H.type === 'bowl' && !H.done) {
     H.done = true;
     S.bowl = Math.max(S.bowl, 3);
