@@ -113,6 +113,8 @@ button:active { background: var(--line); }
         <span>Запасы: <b id="score">0</b></span>
         <span>Щёчки: <b id="cheeks">0/8</b></span>
         <span>Колесо: <b id="dist">0 м</b></span>
+        <span>Хозяин: <b id="owner">добрый</b></span>
+        <span>Укусов: <b id="bites">0</b></span>
       </div>
     </div>
     <button class="small" id="openSettings">Настройки</button>
@@ -140,6 +142,7 @@ button:active { background: var(--line); }
           <li><b>W S / ↑ ↓</b> — вперёд и назад, <b>A D / ← →</b> — поворот</li>
           <li><b>Пробел</b> — прыжок (на крышу домика, оттуда на полку)</li>
           <li><b>E</b> — действие, <b>Q</b> — пискнуть хозяину, <b>V</b> — сменить камеру</li>
+          <li>Когда хозяин сыплет корм или гладит, можно <b>укусить его за руку</b>. Но он обидится</li>
           <li>Тяни мышью или пальцем по клетке, чтобы осмотреться</li>
           <li>Вид от первого лица включается в «Настройках»</li>
         </ul>
@@ -247,6 +250,7 @@ function newState() {
     richness: 1, starve: 0, squeakCd: 0, seedTimer: 6, stashTimer: 0, warned: false,
     ham: { x: -1, y: 0, z: 2.5, vy: 0, yaw: Math.PI * 0.85, onGround: true, state: 'walk', t: 0, tick: 0, walk: 0, moving: false },
     items: [], events: [], hand: null, wheelAng: 0, wheelSpin: 0,
+    ownerMood: 70, bites: 0, petTimer: 25,
   };
 }
 let best = 0;
@@ -596,6 +600,8 @@ const sfx = {
   pick() { tone(900, 1400, 0.07, 0.07, 'triangle'); },
   chomp() { tone(220, 120, 0.06, 0.07, 'square'); },
   drop() { tone(1200, 600, 0.08, 0.04); },
+  bite() { tone(500, 160, 0.06, 0.1, 'square'); setTimeout(() => tone(420, 140, 0.05, 0.08, 'square'), 70); },
+  ouch() { tone(330, 170, 0.32, 0.13, 'sawtooth'); },
 };
 
 // ---------- messages ----------
@@ -626,6 +632,7 @@ function interaction() {
   const h = S.ham;
   if (h.state === 'wheel') return { id: 'exitWheel', label: 'Слезть с колеса' };
   if (h.state === 'sleep' || h.state === 'nap') return { id: 'wake', label: 'Проснуться' };
+  if (h.state === 'petted' || canBite()) return { id: 'bite', label: 'Укусить руку!' };
   if (busy()) return { id: 'none', label: '…', off: true };
   if (!h.onGround) return { id: 'none', label: 'В прыжке!', off: true };
   if (h.y < 0.6 && dist2(h.x, h.z, BOWL.x, BOWL.z) < 1.75) return S.bowl > 0 ? { id: 'eat', label: 'Поесть' } : { id: 'none', label: 'Кормушка пуста — пискни', off: true };
@@ -655,7 +662,47 @@ function doAction() {
     case 'wheel': setState('wheel'); break;
     case 'exitWheel': exitWheel(); break;
     case 'wake': wake(); break;
+    case 'bite': bite(); break;
   }
+}
+
+// ---------- biting the owner's hand ----------
+function bitePoint(H) {
+  return H.type === 'pet' ? { x: H.x, y: H.cy + 0.2, z: H.z } : { x: H.x, y: H.cy + 0.2, z: H.z + 0.45 };
+}
+function canBite() {
+  const H = S.hand, h = S.ham;
+  if (!H || H.type === 'wait' || H.bitten || H.phase === 'up' || H.phase === 'yank') return false;
+  if (h.state !== 'walk' && h.state !== 'petted') return false;
+  if (h.state === 'walk' && !h.onGround) return false;
+  const p = bitePoint(H);
+  const dy = p.y - h.y;
+  return Math.hypot(p.x - h.x, p.z - h.z) < 1.8 && dy < 2.3 && dy > -0.5;
+}
+function dropTreats(H) {
+  for (let i = 0; i < 3; i++) addItem(pick(['seed', 'seed', 'corn', 'carrot', 'nut']), H.x + rnd(-0.4, 0.4), H.cy, H.z + rnd(-0.4, 0.4), 1, rnd(-1.5, 1.5), rnd(-1.5, 1.5));
+}
+function bite() {
+  const H = S.hand, h = S.ham;
+  if (!H || H.type === 'wait') return;
+  const p = bitePoint(H);
+  faceTo(p.x, p.z);
+  setState('bite', 0.45);
+  if (h.onGround) { h.vy = 4.5; h.onGround = false; }
+  H.bitten = true; H.flash = 0.7; H.phase = 'yank'; H.t = 0;
+  S.bites++;
+  S.ownerMood = Math.max(0, S.ownerMood - 25);
+  S.stats.joy = Math.min(100, S.stats.joy + 5);
+  sfx.bite(); setTimeout(() => sfx.ouch(), 120);
+  say(pick(['Ай! Рыжик меня укусил!', 'Ой-ой! Кусается!', 'Ай! Вот вредина!', 'Ай-ай-ай! За палец!']), '#ff9a8a');
+  if (H.type === 'bowl' && !H.done) {
+    H.done = true;
+    S.bowl = Math.max(S.bowl, 3);
+    for (let i = 0; i < 4; i++) { const a = rnd(0, Math.PI * 2); addItem(pick(['seed', 'seed', 'corn']), BOWL.x + Math.cos(a) * 1.4, 1.4, BOWL.z + Math.sin(a) * 1.4, 2, Math.cos(a) * 1.5, Math.sin(a) * 1.5); }
+    setTimeout(() => say('Хозяин от испуга рассыпал корм'), 700);
+  }
+  if (H.type === 'treat' && !H.done) { H.done = true; dropTreats(H); }
+  if (H.type === 'pet') setTimeout(() => say('Хозяин больше не хочет гладить'), 700);
 }
 function exitWheel() { const h = S.ham; setState('walk'); h.x = WHEEL.front.x; h.z = WHEEL.front.z + 0.3; h.y = 0; h.yaw = 0; }
 function wake() {
@@ -669,6 +716,7 @@ function jump() {
   const h = S.ham;
   if (h.state === 'wheel') { exitWheel(); h.vy = 6; h.onGround = false; return; }
   if (h.state === 'sleep' || h.state === 'nap') { wake(); return; }
+  if (h.state === 'petted') { setState('walk'); say('Рыжик вывернулся из-под руки'); }
   if (busy() || !h.onGround) return;
   h.vy = S.stats.energy < 10 ? JUMP * 0.75 : JUMP;
   h.onGround = false;
@@ -680,6 +728,7 @@ function squeak() {
   const h = S.ham;
   if (h.state === 'walk' && h.onGround) { h.vy = 3.5; h.onGround = false; }
   if (S.squeakCd > 0 || S.hand || S.events.length) return;
+  if (S.ownerMood < 20 && Math.random() < 0.5) { setTimeout(() => say('Хозяин обижен и делает вид, что не слышит'), 600); S.squeakCd = 8; return; }
   const need = [];
   if (S.bowl <= 2) need.push('bowl');
   if (S.bottle <= 2) need.push('bottle');
@@ -691,33 +740,61 @@ function squeak() {
 
 function startHand(ev) {
   if (ev.type === 'wait') { S.hand = { type: 'wait', t: ev.t }; return; }
-  const tgt = ev.type === 'bowl' ? { x: BOWL.x, z: BOWL.z - 0.4, y: 1.6 } : ev.type === 'bottle' ? { x: BOTTLE.x - 0.3, z: BOTTLE.z - 1.0, y: 5.6 } : { x: rnd(-6, 6), z: rnd(-2, 3), y: 3.5 };
-  S.hand = { type: ev.type, ...tgt, cy: 16, phase: 'down', t: 0, done: false };
+  if (ev.type === 'pet') {
+    const h = S.ham;
+    if (h.state !== 'walk' || !h.onGround) return; // Рыжик занят — хозяин передумал
+    S.hand = { type: 'pet', x: h.x, z: h.z, y: h.y + 0.75, cy: 16, phase: 'down', t: 0, done: false, bitten: false, flash: 0 };
+    return;
+  }
+  const tgt = ev.type === 'bowl' ? { x: BOWL.x, z: BOWL.z - 0.4, y: 1.6 } : ev.type === 'bottle' ? { x: BOTTLE.x - 0.3, z: BOTTLE.z - 1.0, y: 5.6 } : { x: rnd(-6, 6), z: rnd(-2, 3), y: 1.9 };
+  S.hand = { type: ev.type, ...tgt, cy: 16, phase: 'down', t: 0, done: false, bitten: false, flash: 0 };
 }
 function updateHand(dt) {
   if (!S.hand && S.events.length) startHand(S.events.shift());
-  const H = S.hand;
+  const H = S.hand, h = S.ham;
   if (!H) { hand.visible = false; return; }
   if (H.type === 'wait') { H.t -= dt; if (H.t <= 0) S.hand = null; return; }
   H.t += dt;
-  if (H.phase === 'down') { H.cy += (H.y - H.cy) * Math.min(1, dt * 4); if (H.t > 1) { H.phase = 'hold'; H.t = 0; } }
-  else if (H.phase === 'hold') {
+  H.flash = Math.max(0, H.flash - dt);
+  let rotY = 0, shake = 0;
+  if (H.phase === 'down') {
+    if (H.type === 'pet') { H.x += (h.x - H.x) * Math.min(1, dt * 3); H.z += (h.z - H.z) * Math.min(1, dt * 3); H.y = h.y + 0.75; rotY = h.yaw; }
+    H.cy += (H.y - H.cy) * Math.min(1, dt * 4);
+    if (H.t > 1.1) {
+      H.t = 0;
+      if (H.type === 'pet') {
+        if (h.state === 'walk' && h.onGround && Math.hypot(H.x - h.x, H.z - h.z) < 1.2) { H.phase = 'pet'; setState('petted'); }
+        else { H.phase = 'up'; say('Хозяин не поймал Рыжика'); }
+      } else H.phase = 'hold';
+    }
+  } else if (H.phase === 'hold') {
     if (!H.done) {
       H.done = true;
       if (H.type === 'bowl') { S.bowl = 6; say('Хозяин насыпал свежий корм!'); }
       if (H.type === 'bottle') { S.bottle = 6; updateWater(); say('Хозяин налил свежей воды!', '#bfe8ff'); }
-      if (H.type === 'treat') {
-        for (let i = 0; i < 3; i++) addItem(pick(['seed', 'seed', 'corn', 'carrot', 'nut']), H.x + rnd(-0.4, 0.4), H.cy, H.z + rnd(-0.4, 0.4), 1, rnd(-1.5, 1.5), rnd(-1.5, 1.5));
-        say('Вкусняшки от хозяина!');
-      }
+      if (H.type === 'treat') { dropTreats(H); say('Вкусняшки от хозяина!'); }
     }
     if (H.type === 'bowl' && H.t < 0.6) crumbs(H.x, H.cy - 0.2, H.z + 0.4, ['#e2b04a', '#8a5a2b', '#f3d170'], 2, 0.3);
-    if (H.t > 0.7) { H.phase = 'up'; H.t = 0; }
+    if (H.t > 1.6) { H.phase = 'up'; H.t = 0; }
+  } else if (H.phase === 'pet') {
+    rotY = h.yaw;
+    const stroke = Math.sin(H.t * 5) * 0.3;
+    H.x = h.x + Math.sin(h.yaw) * stroke; H.z = h.z + Math.cos(h.yaw) * stroke;
+    H.cy = h.y + 0.72 + Math.abs(Math.cos(H.t * 5)) * 0.08;
+    if (h.state !== 'petted') { H.phase = 'up'; H.t = 0; if (h.state === 'walk') say('Рыжик убежал от руки'); }
+    else if (H.t > 5) { H.phase = 'up'; H.t = 0; setState('walk'); S.ownerMood = Math.min(100, S.ownerMood + 8); say('Хозяин погладил Рыжика. Приятно!', '#ffc0d6'); }
+  } else if (H.phase === 'yank') {
+    rotY = H.type === 'pet' ? h.yaw : 0;
+    shake = Math.sin(H.t * 45) * 0.12;
+    H.cy += dt * (H.t < 0.15 ? 4 : 22);
+    if (H.cy > 18) S.hand = null;
   } else { H.cy += dt * 14; if (H.cy > 18) S.hand = null; }
+  M.skin.color.set(H.flash > 0 ? 0xff7d6e : 0xf2c4a2);
   if (S.hand) {
     hand.visible = true;
-    hand.position.set(H.x, H.cy, H.z);
-    bag.visible = H.type === 'bowl'; jug.visible = H.type === 'bottle';
+    hand.position.set(H.x + shake, H.cy, H.z);
+    hand.rotation.set(0, rotY, shake * 0.8);
+    bag.visible = H.type === 'bowl' && !(H.bitten && H.phase === 'yank'); jug.visible = H.type === 'bottle';
   } else hand.visible = false;
 }
 
@@ -849,8 +926,21 @@ function update(dt) {
   if (S.clock >= 1440) { S.clock -= 1440; S.day++; }
   if (Math.floor(hourNow()) === 8 && prevHour !== 8 && S.day > S.lastFeedDay) {
     S.lastFeedDay = S.day;
-    S.events.push({ type: 'bowl' }, { type: 'bottle' }, { type: 'treat' });
+    S.events.push({ type: 'bowl' }, { type: 'bottle' });
+    if (S.ownerMood >= 30) S.events.push({ type: 'treat' });
     say(`Доброе утро! День ${S.day}`);
+    if (S.ownerMood < 30) setTimeout(() => say('Хозяин ещё дуется — сегодня без вкусняшек', '#ffb3a8'), 900);
+  }
+  // owner's mood slowly recovers; sometimes the owner comes to pet Ryzhik
+  S.ownerMood = Math.min(100, S.ownerMood + 0.25 * dt);
+  S.petTimer -= dt;
+  if (S.petTimer <= 0) {
+    S.petTimer = rnd(35, 60);
+    const hr = hourNow();
+    if (hr >= 8 && hr < 22 && S.ownerMood >= 25 && !S.hand && !S.events.length && h.state === 'walk' && h.onGround) {
+      S.events.push({ type: 'pet' });
+      say('Хозяин тянет руку погладить Рыжика…', '#ffc0d6');
+    }
   }
 
   const slow = sleeping ? 0.45 : 1;
@@ -910,6 +1000,16 @@ function update(dt) {
       if (Math.random() < dt * 1.3) spawnZ(h.x, h.y + 1, h.z);
       if (st.energy >= 40) setState('walk');
       break;
+    case 'petted': {
+      st.joy += 3.5 * dt;
+      S.ownerMood = Math.min(100, S.ownerMood + 1.5 * dt);
+      const wants = keys.up || keys.down || keys.left || keys.right || Math.abs(joy.x) > 0.3 || Math.abs(joy.y) > 0.3;
+      if (wants) setState('walk');
+      break;
+    }
+    case 'bite':
+      if (h.t <= 0) setState('walk');
+      break;
     case 'wheel':
       st.energy -= 2.2 * dt;
       st.joy += (isNight() ? 5.5 : 3.5) * dt;
@@ -926,9 +1026,10 @@ function update(dt) {
 
   // movement
   h.moving = false;
-  if (h.state === 'walk') {
-    const turn = (keys.left ? 1 : 0) - (keys.right ? 1 : 0) - joy.x;
-    const fwd = (keys.up ? 1 : 0) - (keys.down ? 1 : 0) + joy.y;
+  if (h.state === 'walk' || h.state === 'bite') {
+    const ctl = h.state === 'walk';
+    const turn = ctl ? (keys.left ? 1 : 0) - (keys.right ? 1 : 0) - joy.x : 0;
+    const fwd = ctl ? (keys.up ? 1 : 0) - (keys.down ? 1 : 0) + joy.y : 0.5;
     h.yaw += clamp(turn, -1, 1) * 2.6 * dt;
     const speed = (st.joy < 15 || st.energy < 10 ? 2.6 : 4.2) * clamp(fwd, -0.6, 1);
     const ox = h.x, oz = h.z;
@@ -1030,7 +1131,9 @@ function sync(dt, now) {
   if (h.state === 'dig') hb.rotation.x = 0.25;
   if (h.state === 'chew' || h.state === 'groom') { hb.rotation.x = -0.35; hd.rotation.x = 0.2 + Math.sin(t * (h.state === 'chew' ? 20 : 8)) * 0.08; }
   if (h.state === 'nap') { hb.scale.set(1.05, 0.82, 0.95); hd.rotation.x = 0.3; }
-  const blink = (t % 4) < 0.12 || h.state === 'nap';
+  if (h.state === 'petted') { const sq = Math.abs(Math.cos(t * 5)) * 0.06; hb.scale.set(1 + sq * 0.5, 0.92 - sq, 1); hd.rotation.x = 0.2; }
+  if (h.state === 'bite') { hd.rotation.x = -0.5; hb.rotation.x = -0.35; }
+  const blink = (t % 4) < 0.12 || h.state === 'nap' || h.state === 'petted';
   for (const e of eyes) e.scale.y = blink ? 0.008 : 0.062;
   const cs = 1 + S.cheeks.length * 0.14;
   for (const c of cheeks) c.scale.set(0.15 * cs, 0.14 * cs, 0.15 * cs);
@@ -1078,7 +1181,7 @@ function sync(dt, now) {
     if (fp) { wantPos.set(HOUSE.x, 0.6, HOUSE.z - 0.6); wantTgt.set(HOUSE.x, 0.5, HOUSE.z + 5); }
     else { wantPos.set(HOUSE.door.x + 1.2, 2.6, HOUSE.door.z + 4.2); wantTgt.set(HOUSE.x, 0.9, HOUSE.z + 0.8); }
   } else if (fp) {
-    const yaw = h.yaw, pitch = look.fpPitch + (h.state === 'drink' ? 0.35 : (h.state === 'eat' || h.state === 'dig') ? -0.45 : 0);
+    const yaw = h.yaw, pitch = look.fpPitch + (h.state === 'drink' ? 0.35 : (h.state === 'eat' || h.state === 'dig') ? -0.45 : h.state === 'petted' ? 0.7 : h.state === 'bite' ? 0.45 : 0);
     const eyeH = h.state === 'nap' ? 0.4 : 0.68;
     wantPos.set(h.x + Math.sin(yaw) * 0.55, h.y + eyeH + hb.position.y, h.z + Math.cos(yaw) * 0.55);
     wantTgt.set(wantPos.x + Math.sin(yaw) * Math.cos(pitch), wantPos.y + Math.sin(pitch), wantPos.z + Math.cos(yaw) * Math.cos(pitch));
@@ -1086,11 +1189,13 @@ function sync(dt, now) {
   } else if (h.state === 'wheel') {
     wantPos.set(WHEEL.x - 1.5, 2.8, WHEEL.z + 6.2); wantTgt.set(WHEEL.x, 1.3, WHEEL.z);
   } else {
-    const d = 4.6, p = look.pitch;
+    // while the owner's hand is over Ryzhik, look from the side so the hand doesn't cover the view
+    const petting = h.state === 'petted' || (S.hand && S.hand.type === 'pet' && S.hand.phase !== 'up');
+    const d = petting ? 5.2 : 4.6, p = petting ? 0.35 : look.pitch, cy = h.yaw + (petting ? Math.PI / 2 : 0);
     wantTgt.set(h.x, h.y + 0.7, h.z);
-    wantPos.set(h.x - Math.sin(h.yaw) * Math.cos(p) * d, h.y + 0.7 + Math.sin(p) * d + 0.6, h.z - Math.cos(h.yaw) * Math.cos(p) * d);
+    wantPos.set(h.x - Math.sin(cy) * Math.cos(p) * d, h.y + 0.7 + Math.sin(p) * d + 0.6, h.z - Math.cos(cy) * Math.cos(p) * d);
     // keep the camera inside the cage so bars never block the view
-    const lim = 0.25;
+    const lim = 0.7;
     const cx = clamp(wantPos.x, -HX + lim, HX - lim), cz = clamp(wantPos.z, -HZ + lim, HZ - lim);
     if (cx !== wantPos.x || cz !== wantPos.z) {
       const dx = wantPos.x - h.x, dz = wantPos.z - h.z;
@@ -1127,6 +1232,8 @@ function hud(dt) {
   $('score').textContent = score();
   $('cheeks').textContent = `${S.cheeks.length}/${CHEEK_CAP}`;
   $('dist').textContent = fmtDist(S.wheelDist);
+  $('owner').textContent = S.ownerMood >= 60 ? 'добрый' : S.ownerMood >= 30 ? 'ворчит' : 'обижен';
+  $('bites').textContent = S.bites;
   const it = interaction();
   const key = it.label + (it.off ? 1 : 0);
   if (key !== lastAct) {
