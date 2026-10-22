@@ -149,7 +149,8 @@ button:active { background: var(--line); }
           <li><b>E</b> — действие, <b>Q</b> — пискнуть хозяину, <b>V</b> — сменить камеру</li>
           <li>Когда хозяин сыплет корм или гладит, можно <b>укусить его за руку</b>. Но он обидится</li>
           <li><b>P</b> — покакать. Когда вся клетка в какашках, хозяин пересадит Рыжика в контейнер и будет чистить клетку. Из контейнера можно сбежать: залезь на коробку и прыгай через стенку!</li>
-          <li>На полу живёт кошка <b>Мурка</b>. Прячься от неё <b>под комодом</b>: туда не пролезут ни кошка, ни рука хозяина. Если схватили — кусайся, чтобы вырваться!</li>
+          <li>На полу живёт кошка <b>Мурка</b>. Прячься от неё <b>под комодом</b> или <b>под кроватью</b>: туда не пролезут ни кошка, ни рука хозяина. Если схватили — кусайся, чтобы вырваться!</li>
+          <li>Сбежав, исследуй квартиру: на <b>кухне</b> кошачья еда и вода, в <b>ванной</b> туалетная бумага и лоток, в спальне зеркало, клубок и <b>обувная коробка</b> — тайное жилище. Пискни, чтобы хозяин отнёс домой.</li>
           <li>Тяни мышью или пальцем по клетке, чтобы осмотреться</li>
           <li>Вид от первого лица включается в «Настройках»</li>
         </ul>
@@ -212,6 +213,7 @@ button:active { background: var(--line); }
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Reflector.js"></script>
 <script>
 (() => {
 'use strict';
@@ -236,7 +238,9 @@ const WHEEL = { x: 5, y: 2.3, z: -2.5, r: 2, w: 0.55, front: { x: 5, z: -1.1 } }
 const BOTTLE = { x: 8.55, z: 1.5, spout: { x: 7.85, z: 1.5 } };
 const TABLE_TOP = -0.5, ROOM_FLOOR = -8;
 const CRATE = { x1: 11.9, x2: 16.1, z1: -1.1, z2: 3.1, floor: -0.4, top: 2.2, cx: 14, cz: 1 };
-const CHEST = { hx: 20, hz: 10, bottom: -6.8 };   // chest of drawers stands on legs: a gap underneath to hide in
+const CHEST = { hx: 20, hz: 10, bottom: -6.8 };
+const BED = { x1: -39.5, x2: -24.5, z1: 9, z2: 29.6, bottom: -6.7, top: -3.2 };   // bed: another gap to hide in
+const SHOEBOX = { x1: 28, x2: 36, z1: 18, z2: 26, hz: 22 };                          // secret den in a shoe box   // chest of drawers stands on legs: a gap underneath to hide in
 const DIRT_MAX = 30;            // pellets in the cage that make it "fully dirty"
 const BOXES = [ // solids; walkable ones can be stood on. area = big surfaces (not obstacles); outOnly = only when Ryzhik is outside the cage
   { x1: HOUSE.x - 1.8, x2: HOUSE.x + 1.8, z1: HOUSE.z - 1.5, z2: HOUSE.z + 1.5, bottom: 0, top: HOUSE.top, walk: true },
@@ -271,12 +275,12 @@ function newState() {
     running: false, over: false, paused: false,
     clock: 8 * 60, day: 1, lastFeedDay: 1,
     stats: { food: 85, water: 85, energy: 90, joy: 75 },
-    bowl: 5, bottle: 5, cheeks: [], stash: [], wheelDist: 0,
+    bowl: 5, bottle: 5, cheeks: [], stash: [], stash2: [], grainTimer: 3, wheelDist: 0,
     richness: 1, starve: 0, squeakCd: 0, seedTimer: 6, stashTimer: 0, warned: false,
-    ham: { x: -1, y: 0, z: 2.5, vy: 0, yaw: Math.PI * 0.85, onGround: true, state: 'walk', t: 0, tick: 0, walk: 0, moving: false },
+    ham: { x: -1, y: 0, z: 2.5, vy: 0, yaw: Math.PI * 0.85, onGround: true, den: 'house', state: 'walk', t: 0, tick: 0, walk: 0, moving: false },
     items: [], events: [], hand: null, wheelAng: 0, wheelSpin: 0,
     ownerMood: 70, bites: 0, petTimer: 25,
-    cat: { x: -26, z: 16, yaw: 0.8, state: 'sit', t: 5, jy: 0, anim: 0, moving: false, seen: false, waitSaid: false },
+    cat: { x: 8, z: 20, yaw: 0.8, state: 'sit', t: 8, jy: 0, anim: 0, moving: false, seen: false, waitSaid: false },
     potty: 20, poops: [], zone: 'cage', clean: null, escapes: 0, dirtWarn: 0, urgeSaid: false,
   };
 }
@@ -349,13 +353,197 @@ Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 10, bottom: -10, n
 sun.shadow.bias = -0.0005;
 sun.shadow.normalBias = 0.04;
 scene.add(sun);
-const lamp = new T.PointLight(0xffb066, 0, 40, 1.6); lamp.position.set(-11, 9, 6); scene.add(lamp);
+const lamp = new T.PointLight(0xffb066, 0, 40, 1.6); lamp.position.set(-17, 3, 6); scene.add(lamp);
 const amb = new T.AmbientLight(0xffffff, 0.15); scene.add(amb);
 
 // ---------- room ----------
-const roomMat = new T.MeshStandardMaterial({ color: 0xe7c9a0, side: T.BackSide, roughness: 1 });
-const room = add(new T.BoxGeometry(80, 40, 60), roomMat, 0, 12, 0, scene, false);
-room.receiveShadow = false;
+const roomMat = new T.MeshStandardMaterial({ color: 0xe7c9a0, roughness: 1 });
+// ---------- the flat: bedroom (with the cage), kitchen and bathroom ----------
+const F = ROOM_FLOOR, CT = TABLE_TOP, CEIL = 32, DOOR_H = 14;
+const KDOOR = [-4, 6], BDOOR = [-16, -6];
+function solid(x1, x2, z1, z2, bottom, top, walk = false) { BOXES.push({ x1, x2, z1, z2, bottom, top, walk, area: true, outOnly: true }); }
+function cyl(r1, r2, h, m, x, y, z, parent = scene, seg = 20) { return add(new T.CylinderGeometry(r1, r2, h, seg), m, x, y, z, parent); }
+function ball(r, m, x, y, z, parent = scene) { return add(new T.SphereGeometry(r, 18, 12), m, x, y, z, parent); }
+function flat(geo, m, x, y, z) { const me = add(geo, m, x, y, z, scene, false); me.rotation.x = -Math.PI / 2; return me; }
+function tileTex(c1, c2, n) {
+  const t = canvasTex(256, 256, (g, w, h) => {
+    const sz = w / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { g.fillStyle = (i + j) % 2 ? c1 : c2; g.fillRect(i * sz, j * sz, sz, sz); }
+    g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 2;
+    for (let i = 0; i <= n; i++) { g.beginPath(); g.moveTo(i * sz, 0); g.lineTo(i * sz, h); g.moveTo(0, i * sz); g.lineTo(w, i * sz); g.stroke(); }
+  });
+  t.wrapS = t.wrapT = T.RepeatWrapping;
+  return t;
+}
+const kitchenWall = mat(0xcdbb8e);
+const bathWallTex = tileTex('#9fc4d0', '#b8d6df', 4); bathWallTex.repeat.set(6, 6);
+const bathWall = new T.MeshStandardMaterial({ map: bathWallTex, roughness: 0.5 });
+function wallX(x, z1, z2, m, gaps = [], t = 0.3) {
+  let cur = z1; const segs = [];
+  for (const g of gaps) { segs.push([cur, g[0]]); cur = g[1]; }
+  segs.push([cur, z2]);
+  for (const [a, b] of segs) if (b - a > 0.01) { box(t, CEIL - F, b - a, m, x, (F + CEIL) / 2, (a + b) / 2).castShadow = false; solid(x - t / 2, x + t / 2, a, b, F, CEIL); }
+  for (const g of gaps) box(t, CEIL - F - DOOR_H, g[1] - g[0], m, x, F + DOOR_H + (CEIL - F - DOOR_H) / 2, (g[0] + g[1]) / 2).castShadow = false;
+}
+function wallZ(z, x1, x2, m) { box(x2 - x1, CEIL - F, 0.6, m, (x1 + x2) / 2, (F + CEIL) / 2, z).castShadow = false; solid(x1, x2, z - 0.3, z + 0.3, F, CEIL); }
+wallZ(-30.3, -40, 40, roomMat); wallZ(30.3, -40, 40, roomMat);
+wallZ(-30.3, 40, 96, kitchenWall); wallZ(30.3, 40, 96, kitchenWall);
+wallZ(-30.3, -76, -40, bathWall); wallZ(30.3, -76, -40, bathWall);
+wallX(96.3, -30, 30, kitchenWall, [], 0.6); wallX(-76.3, -30, 30, bathWall, [], 0.6);
+wallX(39.85, -30, 30, roomMat, [KDOOR]); wallX(40.15, -30, 30, kitchenWall, [KDOOR]);
+wallX(-39.85, -30, 30, roomMat, [BDOOR]); wallX(-40.15, -30, 30, bathWall, [BDOOR]);
+for (const [x, g] of [[40, KDOOR], [-40, BDOOR]]) {
+  box(0.9, DOOR_H, 0.4, M.frame, x, F + DOOR_H / 2, g[0]); box(0.9, DOOR_H, 0.4, M.frame, x, F + DOOR_H / 2, g[1]);
+  box(0.9, 0.4, g[1] - g[0] + 0.4, M.frame, x, F + DOOR_H, (g[0] + g[1]) / 2);
+}
+add(new T.PlaneGeometry(172.6, 60.6), mat(0xf6f1ea), 10, CEIL, 0, scene, false).rotation.x = Math.PI / 2;
+{ const t = tileTex('#8f8270', '#6c604f', 8); t.repeat.set(7, 7.5); flat(new T.PlaneGeometry(56, 60), new T.MeshStandardMaterial({ map: t, roughness: 0.7 }), 68, F + 0.01, 0); }
+{ const t = tileTex('#93aab2', '#728b95', 8); t.repeat.set(4.5, 7.5); flat(new T.PlaneGeometry(36, 60), new T.MeshStandardMaterial({ map: t, roughness: 0.5 }), -58, F + 0.01, 0); }
+for (const [x, z] of [[70, 0], [-58, 0]]) {
+  const L = new T.PointLight(0xfff1dc, 0.45, 75, 1.4); L.position.set(x, 26, z); scene.add(L);
+  cyl(2.2, 1.2, 1.2, new T.MeshStandardMaterial({ color: 0xfff6e0, emissive: 0xffe6b0, emissiveIntensity: 0.8 }), x, CEIL - 0.8, z, scene, 18);
+}
+
+// ---------- things on the chest of drawers ----------
+[[0x3d6fb6, 0.12], [0xc0583d, -0.08], [0x4f8a4a, 0.05]].forEach(([c, r], i) => { box(3.4, 0.3, 3.4, mat(c), -16.25, CT + 0.15 + i * 0.3, -6.75).rotation.y = r; });
+solid(-18, -14.5, -8.5, -5, CT, CT + 0.9, true);                                       // books: a step to climb
+cyl(1, 1.1, 0.3, mat(0x2f3b45), -17, CT + 0.15, 6); cyl(0.12, 0.12, 3.4, mat(0x2f3b45), -17, CT + 1.9, 6);
+const shadeMat = new T.MeshStandardMaterial({ color: 0xf6d58a, emissive: 0xffb84d, emissiveIntensity: 0.2, side: T.DoubleSide });
+add(new T.CylinderGeometry(0.5, 1.4, 1.4, 24, 1, true), shadeMat, -17, CT + 4, 6);
+solid(-18.1, -15.9, 4.9, 7.1, CT, CT + 4);
+cyl(0.8, 0.75, 1.6, mat(0x5aa0d8, { roughness: 0.4 }), -12, CT + 0.8, 8); add(new T.TorusGeometry(0.45, 0.12, 8, 16), mat(0x5aa0d8), -12.85, CT + 0.85, 8);
+cyl(0.7, 0.7, 0.05, mat(0x5a3a22), -12, CT + 1.55, 8); solid(-12.85, -11.2, 7.2, 8.8, CT, CT + 1.6);
+ball(0.55, mat(0xd8343a, { roughness: 0.4 }), -13, CT + 0.5, 1.5).scale.y = 0.9;
+cyl(0.04, 0.04, 0.35, mat(0x5a3a22), -13, CT + 1.1, 1.5); ball(0.18, mat(0x5fae4a), -12.85, CT + 1.2, 1.5).scale.set(1.4, 0.3, 0.7);
+cyl(0.12, 0.12, 3, mat(0xf2c230), -15, CT + 0.12, -2.5, scene, 6).rotation.z = Math.PI / 2;
+add(new T.ConeGeometry(0.12, 0.45, 6), mat(0xe8c9a0), -13.28, CT + 0.12, -2.5).rotation.z = -Math.PI / 2;
+cyl(0.13, 0.13, 0.3, mat(0xf29aa0), -16.6, CT + 0.12, -2.5, scene, 6).rotation.z = Math.PI / 2;
+box(2.4, 2, 1.2, mat(0xd64545), 17.2, CT + 1, -7.2); add(new T.CircleGeometry(0.75, 24), mat(0xffffff), 17.2, CT + 1.05, -6.59, scene, false);
+box(0.06, 0.6, 0.02, mat(0x222222), 17.2, CT + 1.25, -6.57); box(0.45, 0.06, 0.02, mat(0x222222), 17.4, CT + 1.05, -6.57);
+solid(16, 18.4, -7.8, -6.6, CT, CT + 2);
+cyl(1, 0.75, 1.5, mat(0xc4683a), 18, CT + 0.75, 7);
+for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2; add(new T.ConeGeometry(0.3, 2.6, 6), mat(0x4f9a4a), 18 + Math.cos(a) * 0.35, CT + 2.7, 7 + Math.sin(a) * 0.35).rotation.set(Math.sin(a) * 0.35, 0, -Math.cos(a) * 0.35); }
+solid(17, 19, 6, 8, CT, CT + 4);
+box(1.6, 0.15, 3, mat(0x22262b, { roughness: 0.3 }), 12.5, CT + 0.08, 7.5);
+box(3, 0.2, 4, mat(0x7fb3d5), -11.5, CT + 0.1, -7.9);
+
+// ---------- bedroom: bed, nightstands, mirror, rug, yarn, shoe box ----------
+{
+  const bedM = mat(0x8b5a3c), bw = BED.x2 - BED.x1, bd = BED.z2 - BED.z1, bcx = (BED.x1 + BED.x2) / 2, bcz = (BED.z1 + BED.z2) / 2;
+  box(bw, 1.5, bd, bedM, bcx, BED.bottom + 0.75, bcz);
+  box(bw - 0.4, 1.6, bd - 0.4, mat(0xf4f1ea), bcx, BED.bottom + 2.3, bcz);
+  box(bw + 0.3, 0.45, 14, mat(0x5f7fc4), bcx, BED.top - 0.22, BED.z1 + 7);
+  box(5, 1, 3.4, mat(0xffffff), bcx - 3.5, BED.top + 0.1, 27.3); box(5, 1, 3.4, mat(0xffffff), bcx + 3.5, BED.top + 0.1, 27.3);
+  box(bw, 8, 0.6, bedM, bcx, BED.bottom + 4, 29.6);
+  for (const x of [BED.x1 + 0.4, BED.x2 - 0.4]) for (const z of [BED.z1 + 0.4, BED.z2 - 0.4]) { box(0.8, BED.bottom - F, 0.8, bedM, x, (F + BED.bottom) / 2, z); solid(x - 0.4, x + 0.4, z - 0.4, z + 0.4, F, BED.bottom); }
+  solid(BED.x1, BED.x2, BED.z1, BED.z2, BED.bottom, BED.top, true);
+  flat(new T.PlaneGeometry(bw - 0.4, bd - 0.4), new T.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false }), bcx, F + 0.02, bcz);
+  const stand = (x1, x2, z1, z2) => {
+    const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, fz = z1 > 0 ? z1 - 0.03 : z2 + 0.03;
+    box(x2 - x1, 6, z2 - z1, mat(0xa9744c), cx, F + 3, cz);
+    box(x2 - x1 - 0.6, 0.1, 0.06, mat(0x6b4426), cx, F + 4.2, fz); box(1.2, 0.25, 0.25, mat(0xd9c39a), cx, F + 4.9, fz);
+    solid(x1, x2, z1, z2, F, F + 6);
+    return { cx, cz };
+  };
+  const n1 = stand(-23.8, -19.8, 25, 29.5);
+  cyl(0.6, 0.7, 0.3, mat(0x7a5a3a), n1.cx, F + 6.15, n1.cz); cyl(0.08, 0.08, 1.8, mat(0x7a5a3a), n1.cx, F + 7.1, n1.cz);
+  add(new T.CylinderGeometry(0.4, 0.9, 1, 18, 1, true), shadeMat, n1.cx, F + 8.2, n1.cz);
+  const n2 = stand(26, 32, -29.5, -24);
+  box(2.2, 2.8, 0.2, mat(0x6b4426), n2.cx, F + 7.4, n2.cz); box(1.8, 2.3, 0.05, mat(0x9fc3e0), n2.cx, F + 7.4, n2.cz + 0.12);
+  const rug = canvasTex(256, 256, (g, w) => { for (let r = 8; r > 0; r--) { g.fillStyle = r % 2 ? '#c9665a' : '#e8c38a'; g.beginPath(); g.arc(w / 2, w / 2, r * 16, 0, 7); g.fill(); } });
+  flat(new T.CircleGeometry(7, 40), new T.MeshStandardMaterial({ map: rug, roughness: 1 }), 8, F + 0.03, 20);
+  box(8.4, 14.4, 0.3, mat(0xc9a06a), -30, F + 7.2, -29.85);
+  add(new T.PlaneGeometry(7.6, 13.6), mat(0xbfcad2, { metalness: 0.9, roughness: 0.08 }), -30, F + 7.2, -29.69, scene, false);
+  box(8, 3.5, 8, mat(0xc9a072), 32, F + 1.75, SHOEBOX.hz); box(8.4, 0.5, 8.4, mat(0xb88d5e), 32, F + 3.6, SHOEBOX.hz);
+  add(new T.CircleGeometry(1, 24), mat(0x2a1a0e), SHOEBOX.x1 - 0.03, F + 1.1, SHOEBOX.hz, scene, false).rotation.y = -Math.PI / 2;
+  solid(SHOEBOX.x1, SHOEBOX.x2, SHOEBOX.z1, SHOEBOX.z2, F, F + 3.9);
+}
+let mirror = null;
+if (T.Reflector) {
+  try {
+    mirror = new T.Reflector(new T.PlaneGeometry(7.6, 13.6), { textureWidth: 512, textureHeight: 512, color: 0xc8d2d8, clipBias: 0.003 });
+    mirror.position.set(-30, F + 7.2, -29.66); mirror.visible = false; scene.add(mirror);
+    const orig = mirror.onBeforeRender;
+    mirror.onBeforeRender = function (...a) { const v = hamster.visible; hamster.visible = S.ham.state !== 'sleep'; orig.apply(this, a); hamster.visible = v; };
+  } catch (e) { mirror = null; }
+}
+const yarn = new T.Group(); yarn.position.set(16, F + 0.9, 20); scene.add(yarn);
+ball(0.9, mat(0xd9455f), 0, 0, 0, yarn);
+for (let i = 0; i < 5; i++) add(new T.TorusGeometry(0.92, 0.04, 6, 30), mat(0xb8344c), 0, 0, 0, yarn, false).rotation.set(i * 0.7, i * 1.3, 0);
+
+// ---------- kitchen ----------
+box(47.7, 9, 5.7, mat(0xe8dcc0), 71.85, F + 4.5, -26.85); box(48, 0.5, 6.1, mat(0x8f8a84), 71.85, F + 9.25, -26.85);
+for (let x = 50; x < 95; x += 5) box(0.08, 7.5, 0.05, mat(0xb9ab8c), x, F + 4.3, -23.98);
+for (let x = 52.5; x < 95; x += 5) box(0.6, 0.2, 0.2, mat(0x8a8a8a), x, F + 7.5, -23.9);
+box(5, 0.3, 3.5, mat(0x9fb2bd, { metalness: 0.6, roughness: 0.3 }), 60, F + 9.4, -26.8); cyl(0.15, 0.15, 2, M.metal, 60, F + 10.5, -28.6);
+box(7, 0.2, 4.5, mat(0x222222), 76, F + 9.55, -26.8);
+for (const [dx, dz] of [[-1.6, -1], [1.6, -1], [-1.6, 1], [1.6, 1]]) cyl(0.9, 0.9, 0.08, mat(0x555555), 76 + dx, F + 9.7, -26.8 + dz, scene, 16);
+solid(48, 95.7, -29.7, -24, F, F + 9.5);
+box(6.7, 22, 9, mat(0xf4f6f7, { roughness: 0.3 }), 92.35, F + 11, -18.5); box(0.3, 6, 0.3, mat(0xb8c3cc), 88.85, F + 13, -15.2); box(0.05, 0.1, 9, mat(0xc9d0d4), 88.98, F + 15.5, -18.5);
+solid(89, 95.7, -23, -14, F, F + 22);
+box(14, 0.6, 9, mat(0xb98a5a), 70, F + 7.4, 10);
+for (const [x, z] of [[63.6, 6], [76.4, 6], [63.6, 14], [76.4, 14]]) { cyl(0.35, 0.35, 7.1, mat(0x8b5a3c), x, F + 3.55, z); solid(x - 0.35, x + 0.35, z - 0.35, z + 0.35, F, F + 7.1); }
+solid(63, 77, 5.5, 14.5, F + 7.1, F + 7.7, true);
+for (const [z, back] of [[18.5, 1], [1.5, -1]]) {
+  box(4, 0.4, 4, mat(0xa3734a), 70, F + 4.5, z); box(4, 4.5, 0.4, mat(0xa3734a), 70, F + 6.9, z + back * 1.8);
+  for (const dx of [-1.7, 1.7]) for (const dz of [-1.7, 1.7]) cyl(0.18, 0.18, 4.3, mat(0x8b5a3c), 70 + dx, F + 2.15, z + dz, scene, 8);
+}
+cyl(1.6, 1, 0.8, mat(0xffffff), 70, F + 8.1, 10);
+for (const [c, dx, dz] of [[0xff9f1c, -0.5, 0], [0x8bc34a, 0.5, 0.2], [0xd8343a, 0, -0.5]]) ball(0.55, mat(c, { roughness: 0.4 }), 70 + dx, F + 8.8, 10 + dz);
+const petBowl = (x, z, c) => { cyl(1.4, 1.1, 0.5, mat(c, { roughness: 0.4 }), x, F + 0.25, z, scene, 24); solid(x - 1.4, x + 1.4, z - 1.4, z + 1.4, F, F + 0.5); };
+petBowl(52, 20, 0xe86a8a); petBowl(56.5, 20, 0x5aa0d8);
+for (let i = 0; i < 22; i++) { const a = i * 2.4, r = Math.sqrt(i / 22) * 1.05; ball(0.16, mat(i % 2 ? 0x8a5a2b : 0xa86f36), 52 + Math.cos(a) * r, F + 0.5, 20 + Math.sin(a) * r).scale.y = 0.6; }
+cyl(1.2, 1.2, 0.05, M.water, 56.5, F + 0.42, 20);
+cyl(1.5, 1.9, 4, mat(0xc8a46a), 86, F + 2, 21, scene, 14); ball(1.5, mat(0xc8a46a), 86, F + 4, 21).scale.y = 0.5;
+add(new T.TorusGeometry(0.7, 0.12, 8, 18), mat(0x8a6a3a), 86, F + 4.5, 21).rotation.x = Math.PI / 2;
+solid(84.2, 87.8, 19.2, 22.8, F, F + 4.5);
+for (let i = 0; i < 30; i++) ball(0.09, mat(0xe6c27a), rnd(80, 85), F + 0.05, rnd(15, 22)).scale.y = 0.5;
+box(2.2, 0.8, 1.2, mat(0xc98a43), 76, F + 0.4, -6).rotation.y = 0.4; box(1.9, 0.1, 0.9, mat(0xf2dfb5), 76, F + 0.82, -6).rotation.y = 0.4;
+ball(0.6, mat(0xd2a46c), 62, F + 0.2, 4).scale.set(1, 0.3, 1.4); cyl(0.15, 0.15, 4, mat(0xd2a46c), 62, F + 0.2, 6.6).rotation.x = Math.PI / 2;
+
+// ---------- bathroom ----------
+{
+  const white = mat(0xffffff, { roughness: 0.2 });
+  cyl(1.5, 1.9, 4.5, white, -71, F + 2.25, -24.5, scene, 24); cyl(2.2, 1.6, 1.4, white, -71, F + 5.1, -24.3, scene, 24);
+  add(new T.TorusGeometry(1.9, 0.25, 8, 24), mat(0xf2f2f2), -71, F + 5.85, -24.3).rotation.x = Math.PI / 2;
+  cyl(1.75, 1.75, 0.05, mat(0x9fd3ef), -71, F + 5.6, -24.3);
+  box(5, 5, 1.8, white, -71, F + 8, -28.7); cyl(0.3, 0.3, 0.2, M.metal, -71, F + 10.6, -28.7);
+  solid(-73.5, -68.5, -29.7, -22.1, F, F + 10.5);
+  box(20.7, 6, 8.7, white, -65.35, F + 3, 25.35); box(19.3, 0.05, 7.3, new T.MeshStandardMaterial({ color: 0x8fd0ee, transparent: true, opacity: 0.85, roughness: 0.05 }), -65.35, F + 6.02, 25.35);
+  cyl(0.2, 0.2, 2.5, M.metal, -75, F + 7, 25.35);
+  solid(-75.7, -55, 21, 29.7, F, F + 6);
+  cyl(0.7, 0.9, 7, white, -48, F + 3.5, -27.5); box(4, 1.2, 3, white, -48, F + 7.6, -27.6); cyl(0.12, 0.12, 1.2, M.metal, -48, F + 8.6, -28.8);
+  add(new T.PlaneGeometry(4, 5), mat(0xbfcad2, { metalness: 0.9, roughness: 0.08 }), -48, F + 13, -29.95, scene, false);
+  solid(-49.5, -46.5, -29.7, -26, F, F + 8.2);
+  box(6, 0.3, 4, mat(0x7a8fa3), -53, F + 0.15, 6);
+  for (const [w, d, x, z] of [[6, 0.15, -53, 4.07], [6, 0.15, -53, 7.93], [0.15, 4, -55.93, 6], [0.15, 4, -50.07, 6]]) box(w, 0.6, d, mat(0x7a8fa3), x, F + 0.3, z);
+  box(5.6, 0.05, 3.6, mat(0xb9b2a5), -53, F + 0.32, 6);
+  solid(-56, -50, 4, 8, F, F + 0.3, true);
+  cyl(0.9, 0.9, 1.6, white, -62, F + 0.9, -18).rotation.x = Math.PI / 2; cyl(0.35, 0.35, 1.62, mat(0x9a7a55), -62, F + 0.9, -18).rotation.x = Math.PI / 2;
+  box(1.4, 0.03, 4, mat(0xffffff), -62, F + 0.02, -15.6);
+  flat(new T.CircleGeometry(1.7, 24), new T.MeshStandardMaterial({ color: 0x9fd8f5, transparent: true, opacity: 0.7, roughness: 0.05 }), -58, F + 0.03, 14).scale.x = 1.3;
+  box(6, 0.08, 4, mat(0x6fb07a), -66, F + 0.04, 16);
+}
+
+// ---------- things to do outside the cage ----------
+const POIS = [
+  { id: 'apple', x: -13, z: 1.5, y: CT, r: 1.6, label: 'Погрызть яблоко', anim: 'eat', dur: 1.4, fx: { food: 12, water: 8 }, potty: 10, msg: 'Сочное яблоко! +12 сытость, +8 вода' },
+  { id: 'pencil', x: -15, z: -2.5, y: CT, r: 1.7, label: 'Погрызть карандаш', anim: 'chew', dur: 1.6, fx: { joy: 10 }, msg: 'Карандаш теперь с узором! +10 радость' },
+  { id: 'mirror', x: -30, z: -27.6, y: F, r: 4, label: 'Посмотреться в зеркало', anim: 'groom', dur: 1.6, fx: { joy: 8 }, msg: 'Кто это там такой красивый? +8 радость' },
+  { id: 'yarn', x: 16, z: 20, y: F, r: 2, label: 'Поиграть с клубком', anim: 'dig', dur: 1.6, fx: { joy: 14 }, msg: 'Клубок! +14 радость' },
+  { id: 'shoebox', x: SHOEBOX.x1 - 1.3, z: SHOEBOX.hz, y: F, r: 1.5, den: 'box' },
+  { id: 'catfood', x: 52, z: 20, y: F, r: 2.3, label: 'Поесть кошачий корм', anim: 'eat', dur: 1.3, fx: { food: 25 }, potty: 22, msg: 'Кошачий корм! Хрум-хрум, +25 сытость', cat: true },
+  { id: 'catwater', x: 56.5, z: 20, y: F, r: 2.3, label: 'Попить из кошачьей миски', anim: 'drink', dur: 1.8, fx: { water: 32 }, msg: '+32 вода', cat: true },
+  { id: 'bread', x: 76, z: -6, y: F, r: 1.9, label: 'Погрызть хлебную корочку', anim: 'eat', dur: 1.4, fx: { food: 15 }, potty: 12, msg: 'Хлебная корочка! +15 сытость' },
+  { id: 'spoon', x: 62, z: 4.5, y: F, r: 2, label: 'Погрызть деревянную ложку', anim: 'chew', dur: 1.6, fx: { joy: 12 }, msg: 'Ложка вкусно хрустит! +12 радость' },
+  { id: 'paper', x: -62, z: -18, y: F, r: 2.1, label: 'Распушить туалетную бумагу', anim: 'dig', dur: 1.8, fx: { joy: 15 }, msg: 'Бумажный снегопад! +15 радость', paper: true },
+  { id: 'puddle', x: -58, z: 14, y: F, r: 2.4, label: 'Попить из лужицы', anim: 'drink', dur: 1.6, fx: { water: 20 }, msg: '+20 вода' },
+];
+const DENS = {
+  house: { out: { x: HOUSE.door.x, y: 0, z: HOUSE.door.z + 0.6, yaw: 0 }, zzz: [HOUSE.door.x + 0.3, 1.0, HOUSE.door.z + 0.2], camOut: [HOUSE.door.x + 1.2, 2.6, HOUSE.door.z + 4.2], tgtOut: [HOUSE.x, 0.9, HOUSE.z + 0.8], camIn: [HOUSE.x, 0.6, HOUSE.z - 0.6], tgtIn: [HOUSE.x, 0.5, HOUSE.z + 5], stash: () => S.stash, name: 'домике' },
+  box: { out: { x: SHOEBOX.x1 - 1.2, y: F, z: SHOEBOX.hz, yaw: -Math.PI / 2 }, zzz: [SHOEBOX.x1 - 0.3, F + 2, SHOEBOX.hz], camOut: [SHOEBOX.x1 - 6, F + 3.5, SHOEBOX.hz + 4], tgtOut: [SHOEBOX.x1 + 1, F + 1.2, SHOEBOX.hz], camIn: [SHOEBOX.x1 + 5, F + 1.2, SHOEBOX.hz], tgtIn: [SHOEBOX.x1 - 8, F + 1, SHOEBOX.hz], stash: () => S.stash2, name: 'коробке' },
+};
+const den = () => DENS[S.ham.den] || DENS.house;
 box(CHEST.hx * 2, TABLE_TOP - CHEST.bottom, CHEST.hz * 2, M.table, 0, (TABLE_TOP + CHEST.bottom) / 2, 0).castShadow = false;
 for (const y of [-2.6, -4.7]) box(40.05, 0.08, 20.05, M.woodDark, 0, y, 0).castShadow = false;
 for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(1, CHEST.bottom - ROOM_FLOOR, 1, M.woodDark, lx * (CHEST.hx - 0.5), (CHEST.bottom + ROOM_FLOOR) / 2, lz * (CHEST.hz - 0.5));
@@ -678,7 +866,7 @@ function pushOut(h) {
     }
   }
   if (S.zone === 'cage') { h.x = clamp(h.x, -HX + RAD, HX - RAD); h.z = clamp(h.z, -HZ + RAD, HZ - RAD); }
-  else { h.x = clamp(h.x, -38, 38); h.z = clamp(h.z, -28, 28); }
+  else { h.x = clamp(h.x, -75.4, 95.4); h.z = clamp(h.z, -29.4, 29.4); }
 }
 const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
@@ -833,7 +1021,12 @@ function interaction() {
   if (busy()) return { id: 'none', label: '…', off: true };
   if (!h.onGround) return { id: 'none', label: 'В прыжке!', off: true };
   if (isHidden()) return { id: 'none', label: 'Рыжик спрятался под комодом', off: true };
-  if (S.zone !== 'cage') return { id: 'groom', label: 'Умываться' };
+  if (S.zone !== 'cage') {
+    const poi = nearPoi();
+    if (poi && poi.den) return { id: 'poi', poi, label: S.cheeks.length ? 'Спрятать запасы в коробке' : 'Спать в коробке' };
+    if (poi) return { id: 'poi', poi, label: poi.label };
+    return { id: 'groom', label: 'Умываться' };
+  }
   if (h.y < 0.6 && dist2(h.x, h.z, BOWL.x, BOWL.z) < 1.75) return S.bowl > 0 ? { id: 'eat', label: 'Поесть' } : { id: 'none', label: 'Кормушка пуста — пискни', off: true };
   if (h.y < 0.1) {
     if (dist2(h.x, h.z, HOUSE.door.x, HOUSE.door.z) < 1.15) return S.cheeks.length ? { id: 'stash', label: 'Спрятать запасы' } : { id: 'sleep', label: 'Спать в домике' };
@@ -856,8 +1049,9 @@ function doAction() {
     case 'dig': setState('dig', 1.1); break;
     case 'chew': faceTo(STICK.x, STICK.z); setState('chew', 1.6); break;
     case 'groom': setState('groom', 1.4); break;
-    case 'stash': setState('stash'); S.stashTimer = 0; break;
-    case 'sleep': setState('sleep'); say('Спокойной ночи…', '#c9c0ff'); break;
+    case 'stash': S.ham.den = 'house'; setState('stash'); S.stashTimer = 0; break;
+    case 'sleep': S.ham.den = 'house'; setState('sleep'); say('Спокойной ночи…', '#c9c0ff'); break;
+    case 'poi': performPoi(it.poi); break;
     case 'wheel': setState('wheel'); break;
     case 'exitWheel': exitWheel(); break;
     case 'wake': wake(); break;
@@ -922,11 +1116,38 @@ function bite() {
     setTimeout(() => say('Хозяин: «Ну, Рыжик! Всё равно поймаю»'), 700);
   }
 }
+function nearPoi() {
+  const h = S.ham;
+  let best = null, bd = 1e9;
+  for (const p of POIS) {
+    const d = Math.hypot(h.x - p.x, h.z - p.z);
+    if (d < p.r && Math.abs(h.y - p.y) < 0.6 && d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+function performPoi(p) {
+  const h = S.ham;
+  if (p.den) {
+    h.den = p.den;
+    if (S.cheeks.length) { setState('stash'); S.stashTimer = 0; }
+    else { setState('sleep'); say('Рыжик залез спать в обувную коробку', '#c9c0ff'); }
+    return;
+  }
+  faceTo(p.x, p.z);
+  h.poi = p; h.actAnim = p.anim; setState('act', p.dur);
+}
+function catAlert() {
+  const c = S.cat;
+  if (roomOf(c.x) === roomOf(S.ham.x) && (c.state === 'sit' || c.state === 'walk')) {
+    c.state = 'stalk'; c.seen = true; catSound('meow');
+    say('Мурка услышала, что кто-то трогает её миску!', '#ffb3a8');
+  }
+}
 function exitWheel() { const h = S.ham; setState('walk'); h.x = WHEEL.front.x; h.z = WHEEL.front.z + 0.3; h.y = 0; h.yaw = 0; }
 function wake() {
   const h = S.ham;
   if (h.state === 'nap' && S.stats.energy < 15) { say('Ещё чуть-чуть…', '#c9c0ff'); return; }
-  if (h.state === 'sleep') { h.x = HOUSE.door.x; h.z = HOUSE.door.z + 0.6; h.y = 0; h.yaw = 0; }
+  if (h.state === 'sleep') { const o = den().out; h.x = o.x; h.z = o.z; h.y = o.y; h.yaw = o.yaw; }
   if (h.state === 'sleep' || h.state === 'nap') setState('walk');
 }
 function jump() {
@@ -947,6 +1168,10 @@ function squeak() {
   say('Пи-пи!', '#ffd2e2');
   const h = S.ham;
   if (h.state === 'walk' && h.onGround) { h.vy = 3.5; h.onGround = false; }
+  if (S.zone === 'out' && !S.clean) {
+    if (!S.hand && !S.events.length) { S.events.push({ type: 'wait', t: 1 }, { type: 'grab', dest: 'cage' }); setTimeout(() => say('Хозяин услышал писк и идёт за Рыжиком'), 500); }
+    return;
+  }
   if (S.clean) return;
   if (S.squeakCd > 0 || S.hand || S.events.length) return;
   if (S.ownerMood < 20 && Math.random() < 0.5) { setTimeout(() => say('Хозяин обижен и делает вид, что не слышит'), 600); S.squeakCd = 8; return; }
@@ -972,6 +1197,7 @@ function poop(forced) {
   S.potty = Math.max(0, S.potty - 45);
   S.stats.joy = Math.min(100, S.stats.joy + 2);
   sfx.plop();
+  if (S.zone === 'out' && h.x > -56 && h.x < -50 && h.z > 4 && h.z < 8) { S.stats.joy = Math.min(100, S.stats.joy + 6); say('Покакал в кошачий лоток. Как воспитанный!', '#d8b48a'); return; }
   say(forced ? 'Ой… не утерпел!' : pick(['Покакал!', 'Готово!', 'Фух, полегчало']), '#d8b48a');
 }
 
@@ -1037,13 +1263,16 @@ function updateHand(dt) {
   H.t += dt;
   H.flash = Math.max(0, H.flash - dt);
   let rotY = 0, shake = 0;
-  if (H.type === 'grab' && H.phase === 'down') {
+  if (H.type === 'grab' && H.phase === 'down' && S.zone === 'out' && H.t > 25) {
+    H.phase = 'up'; H.t = 0; S.clean = null;
+    say('Хозяин устал искать Рыжика. Пискни, когда захочешь домой', '#ffe3b8');
+  } else if (H.type === 'grab' && H.phase === 'down') {
     const sp = Math.min(6.5, 3.4 + H.t * 0.15) * dt;
     const hid = isHidden();
     let tx = h.x, tz = h.z;
     if (hid) {
-      const e = chestEdge(h.x, h.z, 0.9); tx = e.x; tz = e.z;
-      if (!H.hideSaid) { H.hideSaid = true; say('Хозяин не может достать Рыжика из-под комода!', '#9be08a'); }
+      const e = hideEdge(0.9); tx = e.x; tz = e.z;
+      if (!H.hideSaid) { H.hideSaid = true; say(inDen() ? 'Хозяин не может достать Рыжика из коробки!' : 'Хозяин не может достать Рыжика!', '#9be08a'); }
     } else H.hideSaid = false;
     const dx = tx - H.x, dz = tz - H.z, d = Math.hypot(dx, dz);
     if (d > 1e-3) { const s = Math.min(1, sp / d); H.x += dx * s; H.z += dz * s; }
@@ -1220,6 +1449,7 @@ function reset() {
   itemMeshes.clear();
   S = newState();
   addItem('seed', 1.5, 0, 3.4); addItem('corn', -1.5, SHELF.top, -3.2); addItem('seed', -3, 0, 1); addItem('seed', 3, 0, 2.6);
+  for (let i = 0; i < 5; i++) spillGrain();
   updateWater();
 }
 reset();
@@ -1227,7 +1457,8 @@ $('loading').hidden = true; $('play').hidden = false;
 $('play').addEventListener('click', () => { $('start').hidden = true; S.running = true; ensureAudio(); });
 $('again').addEventListener('click', () => { reset(); S.running = true; $('over').hidden = true; });
 
-function score() { return S.stash.reduce((a, b) => a + b, 0); }
+function score() { return S.stash.reduce((a, b) => a + b, 0) + S.stash2.reduce((a, b) => a + b, 0); }
+function spillGrain() { addItem(pick(['seed', 'seed', 'corn', 'nut']), rnd(80, 83.5), ROOM_FLOOR, rnd(15, 22)); }
 function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(2) + ' км' : Math.floor(m) + ' м'; }
 function gameOver() {
   S.over = true; S.running = false;
@@ -1309,14 +1540,14 @@ function update(dt) {
     case 'stash':
       S.stashTimer -= dt;
       if (S.stashTimer <= 0) {
-        if (!S.cheeks.length) { say('Запасы в домике: ' + score()); setState('walk'); break; }
-        S.stash.push(S.cheeks.pop()); sfx.pick(); S.stashTimer = 0.28;
+        if (!S.cheeks.length) { say('Запасы в ' + den().name + ': ' + den().stash().reduce((a, b) => a + b, 0)); setState('walk'); break; }
+        den().stash().push(S.cheeks.pop()); sfx.pick(); S.stashTimer = 0.28;
       }
       break;
     case 'sleep':
       st.energy += 8 * dt;
-      if (h.tick > 2.5 && st.food < 30 && S.stash.length) { h.tick = 0; const v = S.stash.shift(); st.food += 6 + v * 3; S.potty += 10; say('Перекусил запасом из домика', '#ffd27a'); }
-      if (Math.random() < dt * 1.3) spawnZ(HOUSE.door.x + 0.3, 1.0, HOUSE.door.z + 0.2);
+      if (h.tick > 2.5 && st.food < 30 && den().stash().length) { h.tick = 0; const v = den().stash().shift(); st.food += 6 + v * 3; S.potty += 10; say('Перекусил запасом из домика', '#ffd27a'); }
+      if (Math.random() < dt * 1.3) spawnZ(...den().zzz);
       if (st.energy >= 100) { st.energy = 100; say('Выспался!', '#c9c0ff'); wake(); }
       break;
     case 'nap':
@@ -1334,6 +1565,22 @@ function update(dt) {
     case 'bite':
       if (h.t <= 0) setState('walk');
       break;
+    case 'act': {
+      const p = h.poi;
+      if (h.tick > 0.3) {
+        h.tick = 0;
+        if (p.anim === 'eat' || p.anim === 'chew') { sfx.chomp(); crumbs(h.x + fx * 0.8, h.y + 0.3, h.z + fz * 0.8, p.id === 'pencil' ? ['#f2c230', '#e8c9a0'] : ['#d9a24a', '#8a5a2b'], 2, 0.5); }
+        if (p.paper) crumbs(h.x + fx * 0.8, h.y + 0.5, h.z + fz * 0.8, ['#ffffff', '#f4f4f4', '#e2e2e2'], 6, 1.6);
+      }
+      if (h.t <= 0) {
+        for (const k in p.fx) st[k] += p.fx[k];
+        if (p.potty) S.potty += p.potty;
+        say(p.msg, p.fx.joy ? '#ffc0d6' : p.fx.water && !p.fx.food ? '#9fdcff' : '#ffd27a');
+        if (p.cat) catAlert();
+        setState('walk');
+      }
+      break;
+    }
     case 'poop':
       if (h.t <= 0) setState('walk');
       break;
@@ -1358,7 +1605,9 @@ function update(dt) {
   if (dirt >= 50 && S.dirtWarn < 1) { S.dirtWarn = 1; say('В клетке уже пахнет…', '#d8b48a'); }
   if (dirt >= 80 && S.dirtWarn < 2) { S.dirtWarn = 2; say('Ещё немного — и хозяин придёт убираться', '#d8b48a'); }
   if (dirt < 30) S.dirtWarn = 0;
-  if (dirt >= 100 && !S.clean && !S.hand && !S.events.length) triggerClean();
+  if (dirt >= 100 && S.zone === 'cage' && !S.clean && !S.hand && !S.events.length) triggerClean();
+  S.grainTimer -= dt;
+  if (S.grainTimer <= 0) { S.grainTimer = 15; if (S.items.filter(it => it.x > 76).length < 7) spillGrain(); }
   if (S.clean && S.clean.phase !== 'grab' && S.zone === 'out' && h.state !== 'carried') {
     if (!S.clean.escaped && (h.x < CRATE.x1 || h.x > CRATE.x2 || h.z < CRATE.z1 || h.z > CRATE.z2)) {
       S.clean.escaped = true; S.escapes++; st.joy = Math.min(100, st.joy + 20);
@@ -1416,7 +1665,7 @@ function update(dt) {
   S.seedTimer -= dt;
   if (S.seedTimer <= 0) {
     S.seedTimer = rnd(14, 24);
-    if (S.items.length < 8) {
+    if (S.items.filter(insideCage).length < 8) {
       if (Math.random() < 0.3) addItem(Math.random() < 0.85 ? 'seed' : 'corn', rnd(SHELF.x1 + 0.4, SHELF.x2 - 0.4), SHELF.top, rnd(SHELF.z1 + 0.4, SHELF.z2 - 0.4));
       else for (let tries = 0; tries < 10; tries++) {
         const x = rnd(-HX + 1, HX - 1), z = rnd(-HZ + 1, HZ - 1);
@@ -1448,12 +1697,37 @@ const wantPos = new T.Vector3(), wantTgt = new T.Vector3();
 function lerpHex(a, b, t) { return cA.set(a).lerp(cB.set(b), t); }
 
 // ---------- hiding & cat AI ----------
-function underChest(x, z, m = 0) { return Math.abs(x) < CHEST.hx + m && Math.abs(z) < CHEST.hz + m; }
-function isHidden() { const h = S.ham; return S.zone === 'out' && h.y < ROOM_FLOOR + 0.5 && underChest(h.x, h.z, -0.3); }
-function chestEdge(x, z, out) {
-  // nearest point just outside the chest's footprint
-  if (CHEST.hx - Math.abs(x) < CHEST.hz - Math.abs(z)) return { x: Math.sign(x || 1) * (CHEST.hx + out), z };
-  return { x, z: Math.sign(z || 1) * (CHEST.hz + out) };
+const CHEST_R = { x1: -CHEST.hx, x2: CHEST.hx, z1: -CHEST.hz, z2: CHEST.hz };
+const ROOM_R = { bed: { x1: -40, x2: 40, z1: -30, z2: 30 }, kitchen: { x1: 40, x2: 96, z1: -30, z2: 30 }, bath: { x1: -76, x2: -40, z1: -30, z2: 30 } };
+const LOWS = [{ r: CHEST_R, y: CHEST.bottom, top: TABLE_TOP }, { r: BED, y: BED.bottom, top: BED.top }];
+const DOORS = { kitchen: { x: 40, z: 1 }, bath: { x: -40, z: -11 } };
+const CAT_SPOTS = [{ x: 8, z: 20 }, { x: 54, z: 13 }, { x: -64, z: 12 }, { x: 0, z: -24 }, { x: 70, z: 10 }, { x: 30, z: 6 }];
+function inRect(r, x, z, m = 0) { return x > r.x1 - m && x < r.x2 + m && z > r.z1 - m && z < r.z2 + m; }
+function underChest(x, z, m = 0) { return inRect(CHEST_R, x, z, m); }
+function roomOf(x) { return x > 40 ? 'kitchen' : x < -40 ? 'bath' : 'bed'; }
+function hideRect(x, z) { if (underChest(x, z, -0.3)) return CHEST_R; if (inRect(BED, x, z, -0.3)) return BED; return null; }
+function inDen() { const h = S.ham; return S.zone === 'out' && h.state === 'sleep' && h.den === 'box'; }
+function isHidden() { const h = S.ham; if (S.zone !== 'out') return false; if (inDen()) return true; return h.y < ROOM_FLOOR + 0.5 && !!hideRect(h.x, h.z); }
+function hideEdge(out) {
+  // the nearest spot just outside Ryzhik's hiding place
+  const h = S.ham;
+  if (inDen()) return { x: SHOEBOX.x1 - out - 0.6, z: SHOEBOX.hz };
+  const r = hideRect(h.x, h.z) || CHEST_R, room = ROOM_R[roomOf(h.x)];
+  const c = [
+    { d: h.x - r.x1, x: r.x1 - out, z: h.z }, { d: r.x2 - h.x, x: r.x2 + out, z: h.z },
+    { d: h.z - r.z1, x: h.x, z: r.z1 - out }, { d: r.z2 - h.z, x: h.x, z: r.z2 + out },
+  ].filter(q => inRect(room, q.x, q.z, -0.8)).sort((a, b) => a.d - b.d);
+  return c[0] || { x: h.x, z: h.z };
+}
+function nav(fx, fz, tx, tz) {
+  // route through the doorway when the target is in another room
+  const a = roomOf(fx), b = roomOf(tx);
+  if (a === b) return { x: tx, z: tz };
+  const via = a === 'bed' ? b : a, d = DOORS[via];
+  const side = a === 'bed' ? (via === 'kitchen' ? 1 : -1) : (via === 'kitchen' ? -1 : 1);
+  const front = { x: d.x - side * 2.5, z: d.z };
+  if (Math.abs(fx - d.x) > 2.4 && Math.hypot(fx - front.x, fz - front.z) > 1) return front;
+  return { x: d.x + side * 3, z: d.z };
 }
 function turnTo(c, yaw, dt, rate) { const d = Math.atan2(Math.sin(yaw - c.yaw), Math.cos(yaw - c.yaw)); c.yaw += clamp(d, -rate * dt, rate * dt); }
 function catMoveTo(c, tx, tz, sp, dt) {
@@ -1462,12 +1736,19 @@ function catMoveTo(c, tx, tz, sp, dt) {
   return d;
 }
 function keepCatOut(c) {
-  const m = 1.5;
-  if (underChest(c.x, c.z, m)) {
-    if (CHEST.hx + m - Math.abs(c.x) < CHEST.hz + m - Math.abs(c.z)) c.x = Math.sign(c.x || 1) * (CHEST.hx + m);
-    else c.z = Math.sign(c.z || 1) * (CHEST.hz + m);
+  const r = 1.4;
+  for (const b of BOXES) {
+    if (b.bottom > ROOM_FLOOR + 2.8 || b.top < ROOM_FLOOR + 0.6) continue; // the cat walks under high things and steps over flat ones
+    const cx = clamp(c.x, b.x1, b.x2), cz = clamp(c.z, b.z1, b.z2);
+    const dx = c.x - cx, dz = c.z - cz, d = Math.hypot(dx, dz);
+    if (d >= r) continue;
+    if (d > 1e-4) { c.x = cx + dx / d * r; c.z = cz + dz / d * r; }
+    else {
+      const o = [[c.x - b.x1, -1, 0], [b.x2 - c.x, 1, 0], [c.z - b.z1, 0, -1], [b.z2 - c.z, 0, 1]].sort((a, q) => a[0] - q[0])[0];
+      if (o[1]) c.x = o[1] < 0 ? b.x1 - r : b.x2 + r; else c.z = o[2] < 0 ? b.z1 - r : b.z2 + r;
+    }
   }
-  c.x = clamp(c.x, -36, 36); c.z = clamp(c.z, -26, 26);
+  c.x = clamp(c.x, -74.6, 94.6); c.z = clamp(c.z, -28.6, 28.6);
 }
 function biteCat() {
   const c = S.cat, h = S.ham;
@@ -1477,27 +1758,31 @@ function biteCat() {
   c.state = 'flee'; c.t = 5;
   S.stats.joy = Math.min(100, S.stats.joy + 10);
   sfx.bite(); setTimeout(() => catSound('yowl'), 100);
+  c.bored = 12;
   say('Мяу-у!!! Мурка отпустила Рыжика и удрала', '#9be08a');
 }
 function updateCat(dt) {
   const c = S.cat, h = S.ham;
   c.t -= dt; c.anim += dt; c.moving = false;
+  c.bored = Math.max(0, (c.bored || 0) - dt);
   const onFloor = S.zone === 'out' && h.state !== 'carried' && h.y < ROOM_FLOOR + 0.6;
   const hidden = isHidden();
   const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
+  const dH = Math.hypot(h.x - c.x, h.z - c.z), sameRoom = roomOf(c.x) === roomOf(h.x);
+  const go = (tx, tz, sp) => { const w = nav(c.x, c.z, tx, tz); catMoveTo(c, w.x, w.z, sp, dt); return Math.hypot(tx - c.x, tz - c.z); };
   switch (c.state) {
     case 'hold':
       h.x = c.x + fx * 2.85; h.z = c.z + fz * 2.85; h.y = ROOM_FLOOR + 1.55; h.vy = 0; h.yaw = c.yaw + Math.PI / 2;
       if (c.t <= 0) {
         S.stats.joy = Math.max(0, S.stats.joy - 25); S.stats.energy = Math.max(0, S.stats.energy - 15);
         setState('walk'); h.y = ROOM_FLOOR + 0.3; h.onGround = false;
-        c.state = 'flee'; c.t = 4;
+        c.state = 'flee'; c.t = 4; c.bored = 10;
         say('Хозяин: «Брысь, Мурка!» Кошка выронила Рыжика', '#ffb3a8');
       }
       break;
     case 'flee':
       catMoveTo(c, c.x - (h.x - c.x) * 3, c.z - (h.z - c.z) * 3, 7, dt);
-      if (c.t <= 0) { c.state = 'sit'; c.t = 5; }
+      if (c.t <= 0) { c.state = 'sit'; c.t = 6; }
       break;
     case 'pounce': {
       c.pt += dt;
@@ -1513,43 +1798,49 @@ function updateCat(dt) {
       break;
     }
     case 'recover':
-      if (c.t <= 0) { c.state = 'sit'; c.t = 0; }
+      if (c.t <= 0) { c.state = onFloor && !hidden ? 'stalk' : 'sit'; c.t = 2; }
       break;
     case 'stalk': {
-      if (!onFloor || hidden) { c.state = hidden ? 'wait' : 'sit'; c.t = 3; break; }
-      const dx = h.x - c.x, dz = h.z - c.z, d = Math.hypot(dx, dz);
-      turnTo(c, Math.atan2(dx, dz), dt, 4);
-      if (d > 5.3) catMoveTo(c, h.x, h.z, 1.9, dt);
-      else {
+      if (!onFloor) { c.state = 'sit'; c.t = 3; break; }
+      if (hidden) { c.state = 'wait'; c.t = 3; break; }
+      if (dH > 32) { c.state = 'sit'; c.t = 4; c.bored = 6; say('Мурка потеряла Рыжика из виду', '#9be08a'); break; }
+      if (sameRoom && dH <= 5.3) {
         c.state = 'pounce'; c.pt = 0; c.fx = c.x; c.fz = c.z;
-        c.tx = h.x - dx / d * 2.7; c.tz = h.z - dz / d * 2.7;
+        c.tx = h.x - (h.x - c.x) / dH * 2.7; c.tz = h.z - (h.z - c.z) / dH * 2.7;
+        turnTo(c, Math.atan2(h.x - c.x, h.z - c.z), 1, 10);
         catSound('hiss');
+      } else {
+        go(h.x, h.z, sameRoom ? 1.9 : 3.2);
+        if (sameRoom) turnTo(c, Math.atan2(h.x - c.x, h.z - c.z), dt, 4);
       }
       break;
     }
     case 'wait': {
       if (!hidden) { c.state = onFloor ? 'stalk' : 'sit'; c.t = 1; break; }
-      const e = chestEdge(h.x, h.z, 1.6);
-      if (catMoveTo(c, e.x, e.z, 3, dt) < 0.3) turnTo(c, Math.atan2(h.x - c.x, h.z - c.z), dt, 3);
-      if (!c.waitSaid) { c.waitSaid = true; say('Мурка караулит у комода…', '#ffb3a8'); }
+      const e = hideEdge(1.6);
+      if (go(e.x, e.z, 3) < 0.4) turnTo(c, Math.atan2(h.x - c.x, h.z - c.z), dt, 3);
+      if (!c.waitSaid) { c.waitSaid = true; say('Мурка караулит у укрытия…', '#ffb3a8'); }
       if (Math.random() < dt * 0.15) catSound('meow');
+      if (c.t < -25) { c.state = 'sit'; c.t = 0; c.bored = 15; say('Мурке надоело караулить', '#9be08a'); }
       break;
     }
     case 'walk':
-      if (catMoveTo(c, c.tx, c.tz, 2.2, dt) < 0.3) { c.state = 'sit'; c.t = rnd(4, 9); }
+      if (go(c.tx, c.tz, 2.2) < 0.5 || c.t < -40) { c.state = 'sit'; c.t = rnd(6, 14); }
       break;
-    default: // sit
+    default: // sit / nap
       if (c.t <= 0) {
-        for (let i = 0; i < 10; i++) { c.tx = rnd(-34, 34); c.tz = rnd(-24, 24); if (!underChest(c.tx, c.tz, 2)) break; }
-        c.state = 'walk';
+        if (Math.random() < 0.6) { const sp = pick(CAT_SPOTS); c.tx = sp.x; c.tz = sp.z; }
+        else { const r = ROOM_R[pick(['bed', 'kitchen', 'bath'])]; c.tx = rnd(r.x1 + 4, r.x2 - 4); c.tz = rnd(r.z1 + 4, r.z2 - 4); }
+        c.state = 'walk'; c.t = 0;
       }
       if (Math.random() < dt * 0.02) catSound('meow');
   }
-  if (onFloor && !hidden && (c.state === 'sit' || c.state === 'walk' || c.state === 'wait')) {
+  const sight = c.state === 'sit' ? 8 : 18;
+  if (onFloor && !hidden && !c.bored && sameRoom && dH < sight && (c.state === 'sit' || c.state === 'walk')) {
     c.state = 'stalk';
-    if (!c.seen) { c.seen = true; catSound('meow'); say('Кошка Мурка заметила Рыжика! Беги под комод!', '#ffb3a8'); }
+    if (!c.seen) { c.seen = true; catSound('meow'); say('Кошка Мурка заметила Рыжика! Прячься!', '#ffb3a8'); }
   }
-  if (!onFloor) c.seen = false;
+  if (!onFloor || c.state === 'sit') c.seen = false;
   if (!hidden) c.waitSaid = false;
   if (c.state !== 'pounce') keepCatOut(c);
 }
@@ -1605,6 +1896,8 @@ function sync(dt, now) {
   hb.rotation.set(0, 0, 0); hd.rotation.set(0, 0, 0);
   hb.scale.set(1, 1, 1);
   if (!h.onGround && h.state === 'walk') hb.rotation.x = h.vy > 0 ? -0.2 : 0.15;
+  const realState = h.state;
+  if (h.state === 'act') h.state = h.actAnim;   // reuse the pose of the matching action
   if (h.state === 'eat') hd.rotation.x = 0.35 + Math.sin(t * 18) * 0.1;
   if (h.state === 'drink') { hd.rotation.x = -0.5; hb.rotation.x = -0.15; }
   if (h.state === 'dig') hb.rotation.x = 0.25;
@@ -1615,7 +1908,11 @@ function sync(dt, now) {
   if (h.state === 'poop') { hb.scale.set(1.06, 0.88, 1); hb.rotation.x = -0.12; }
   if (h.state === 'carried') { hb.rotation.x = 0.15; hd.rotation.x = -0.2; }
   if (h.state === 'catHeld') { hb.rotation.z = Math.sin(t * 20) * 0.25; hd.rotation.x = -0.3; }
+  h.state = realState;
   syncCat(t);
+  if (mirror) mirror.visible = S.zone === 'out' && roomOf(h.x) === 'bed' && Math.hypot(h.x + 30, h.z + 29.7) < 30;
+  if (h.state === 'act' && h.poi && h.poi.id === 'yarn') { yarn.rotation.z += dt * 6; yarn.position.x = 16 + Math.sin(t * 6) * 0.3; }
+  shadeMat.emissiveIntensity = 0.2 + nightAmount() * 0.9;
   const blink = (t % 4) < 0.12 || h.state === 'nap' || h.state === 'petted';
   for (const e of eyes) e.scale.y = blink ? 0.008 : 0.062;
   const cs = 1 + S.cheeks.length * 0.14;
@@ -1670,8 +1967,9 @@ function sync(dt, now) {
   camera.fov = fp ? 78 : 58;
   let snap = false;
   if (sleeping) {
-    if (fp) { wantPos.set(HOUSE.x, 0.6, HOUSE.z - 0.6); wantTgt.set(HOUSE.x, 0.5, HOUSE.z + 5); }
-    else { wantPos.set(HOUSE.door.x + 1.2, 2.6, HOUSE.door.z + 4.2); wantTgt.set(HOUSE.x, 0.9, HOUSE.z + 0.8); }
+    const D = den();
+    if (fp) { wantPos.set(...D.camIn); wantTgt.set(...D.tgtIn); }
+    else { wantPos.set(...D.camOut); wantTgt.set(...D.tgtOut); }
   } else if (fp) {
     const yaw = h.yaw, pitch = look.fpPitch + (h.state === 'drink' ? 0.35 : (h.state === 'eat' || h.state === 'dig') ? -0.45 : h.state === 'petted' ? 0.7 : h.state === 'bite' ? 0.45 : 0);
     const eyeH = h.state === 'nap' ? 0.4 : 0.68;
@@ -1688,9 +1986,8 @@ function sync(dt, now) {
     wantPos.set(h.x - Math.sin(cy) * Math.cos(p) * d, h.y + 0.7 + Math.sin(p) * d + 0.6, h.z - Math.cos(cy) * Math.cos(p) * d);
     // keep the camera inside the cage so bars never block the view (outside: inside the room)
     const inCage = S.zone === 'cage' && h.state !== 'carried';
-    const lim = inCage ? 0.7 : 0;
-    const LX = inCage ? HX : 38, LZ = inCage ? HZ : 28;
-    const cx = clamp(wantPos.x, -LX + lim, LX - lim), cz = clamp(wantPos.z, -LZ + lim, LZ - lim);
+    const RR = inCage ? { x1: -HX, x2: HX, z1: -HZ, z2: HZ } : ROOM_R[roomOf(h.x)], lim = inCage ? 0.7 : 1;
+    const cx = clamp(wantPos.x, RR.x1 + lim, RR.x2 - lim), cz = clamp(wantPos.z, RR.z1 + lim, RR.z2 - lim);
     if (cx !== wantPos.x || cz !== wantPos.z) {
       const dx = wantPos.x - h.x, dz = wantPos.z - h.z;
       let s = 1;
@@ -1702,9 +1999,12 @@ function sync(dt, now) {
     }
     wantPos.y = inCage ? clamp(wantPos.y, 0.35, BAR_H - 0.4) : Math.max(wantPos.y, h.y + 0.4);
     // under or right next to the chest of drawers: keep the camera low, in the gap
-    if (!inCage && h.y < CHEST.bottom) {
-      if (underChest(h.x, h.z, 0.5)) wantPos.set(h.x - Math.sin(cy) * 3.2, Math.min(h.y + 1.0, CHEST.bottom - 0.3), h.z - Math.cos(cy) * 3.2);
-      if (underChest(wantPos.x, wantPos.z, 0.3) && wantPos.y > CHEST.bottom - 0.3) wantPos.y = CHEST.bottom - 0.3;
+    if (!inCage) wantPos.y = Math.min(wantPos.y, CEIL - 1);
+    if (!inCage && h.y < ROOM_FLOOR + 1) {
+      for (const L of LOWS) {
+        if (inRect(L.r, h.x, h.z, 0.5)) wantPos.set(h.x - Math.sin(cy) * 3.2, Math.min(h.y + 1.0, L.y - 0.3), h.z - Math.cos(cy) * 3.2);
+        if (inRect(L.r, wantPos.x, wantPos.z, 0.3) && wantPos.y > L.y - 0.3 && wantPos.y < L.top + 0.3) wantPos.y = L.y - 0.3;
+      }
     }
   }
   if (snap) { camPos.copy(wantPos); camTgt.copy(wantTgt); }
