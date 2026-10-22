@@ -1482,7 +1482,7 @@ function updateCat(dt) {
   const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
   switch (c.state) {
     case 'hold':
-      h.x = c.x + fx * 3.0; h.z = c.z + fz * 3.0; h.y = ROOM_FLOOR + 1.15; h.vy = 0; h.yaw = c.yaw + Math.PI / 2;
+      h.x = c.x + fx * 2.85; h.z = c.z + fz * 2.85; h.y = ROOM_FLOOR + 1.55; h.vy = 0; h.yaw = c.yaw + Math.PI / 2;
       if (c.t <= 0) {
         S.stats.joy = Math.max(0, S.stats.joy - 25); S.stats.energy = Math.max(0, S.stats.energy - 15);
         setState('walk'); h.y = ROOM_FLOOR + 0.3; h.onGround = false;
